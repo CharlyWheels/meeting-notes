@@ -309,6 +309,71 @@ import Testing
   }
 }
 
+@Test func meetingDetectionWithCameraOffNeedsTheAppToUseTheMicrophone() {
+  let teams = MeetingAppDetector.RunningApp(bundleIdentifier: "com.microsoft.teams2", isActive: false)
+  // Teams merely running while something else uses the microphone is no meeting.
+  #expect(MeetingAppDetector.detect(
+    cameraActive: false, microphoneActive: true, apps: [teams],
+    microphoneBundles: ["com.apple.VoiceMemos"]) == nil)
+  // Unknown microphone owner (older macOS): unchanged, camera still required.
+  #expect(MeetingAppDetector.detect(
+    cameraActive: false, microphoneActive: true, apps: [teams], microphoneBundles: nil) == nil)
+
+  let detection = MeetingAppDetector.detect(
+    cameraActive: false, microphoneActive: true, apps: [teams],
+    microphoneBundles: ["com.microsoft.teams2.helper"])
+  #expect(detection == MeetingAppDetector.Detection(
+    app: "Teams", cameraActive: false, appIsUsingMicrophone: true, isDedicatedApp: true))
+}
+
+@Test func meetingDetectionPrefersTheAppUsingTheMicrophoneOverTheFrontmostOne() {
+  let zoom = MeetingAppDetector.RunningApp(bundleIdentifier: "us.zoom.xos", isActive: true)
+  let teams = MeetingAppDetector.RunningApp(bundleIdentifier: "com.microsoft.teams2", isActive: false)
+  let detection = MeetingAppDetector.detect(
+    cameraActive: true, microphoneActive: true, apps: [zoom, teams],
+    microphoneBundles: ["com.microsoft.teams2"])
+  #expect(detection?.app == "Teams")
+  #expect(detection?.appIsUsingMicrophone == true)
+}
+
+@Test func microphoneOwnersAreMatchedByBundlePrefix() {
+  #expect(MeetingAppDetector.meetingApp(forMicrophoneBundle: "us.zoom.xos") == "Zoom")
+  #expect(MeetingAppDetector.meetingApp(forMicrophoneBundle: "us.zoom.CptHost") == "Zoom")
+  #expect(MeetingAppDetector.meetingApp(forMicrophoneBundle: "com.microsoft.teams2.helper") == "Teams")
+  #expect(MeetingAppDetector.meetingApp(forMicrophoneBundle: "com.google.Chrome.helper") == nil)
+}
+
+@Test func autoRecordNeedsCameraEnabledDedicatedAppAndMicrophoneUse() {
+  let enabled: Set<String> = ["Teams", "Zoom"]
+  func detection(
+    _ app: String = "Teams", camera: Bool = true, usingMicrophone: Bool = true, dedicated: Bool = true
+  ) -> MeetingAppDetector.Detection {
+    .init(app: app, cameraActive: camera, appIsUsingMicrophone: usingMicrophone, isDedicatedApp: dedicated)
+  }
+
+  #expect(AutoRecordPolicy.shouldStart(detection(), enabledApps: enabled, canTellMicrophoneOwner: true))
+  // Microphone only: ask, never record on its own.
+  #expect(!AutoRecordPolicy.shouldStart(detection(camera: false), enabledApps: enabled, canTellMicrophoneOwner: true))
+  // Camera on, but another app holds the microphone while Teams sits in the background.
+  #expect(!AutoRecordPolicy.shouldStart(
+    detection(usingMicrophone: false), enabledApps: enabled, canTellMicrophoneOwner: true))
+  // Without a way to tell the owner, the running dedicated app is the best evidence.
+  #expect(AutoRecordPolicy.shouldStart(
+    detection(usingMicrophone: false), enabledApps: enabled, canTellMicrophoneOwner: false))
+  // Browsers and apps that were not enabled keep the notification.
+  #expect(!AutoRecordPolicy.shouldStart(
+    detection("Chrome", dedicated: false), enabledApps: enabled, canTellMicrophoneOwner: true))
+  #expect(!AutoRecordPolicy.shouldStart(detection("Zoom"), enabledApps: ["Teams"], canTellMicrophoneOwner: true))
+  #expect(!AutoRecordPolicy.shouldStart(detection("FaceTime"), enabledApps: enabled, canTellMicrophoneOwner: true))
+}
+
+@Test func autoRecordSettingsAreOffByDefaultAndKeepOnlySupportedApps() throws {
+  let defaults = try #require(UserDefaults(suiteName: "auto-record-\(UUID().uuidString)"))
+  #expect(AutoRecordSettingsStore.load(from: defaults).isEmpty)
+  AutoRecordSettingsStore.save(["Teams", "Zoom", "Chrome"], to: defaults)
+  #expect(AutoRecordSettingsStore.load(from: defaults) == ["Teams", "Zoom"])
+}
+
 @MainActor
 @Test func meetingAutoStopWaitsForGracePeriodAndCancelsWhenDetectionReturns() async throws {
   let scheduler = MeetingAutoStopScheduler()

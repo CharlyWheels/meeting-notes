@@ -18,6 +18,8 @@ final class MeetingNotificationService: NSObject, UNUserNotificationCenterDelega
   private let pausedIdentifier = "recording-paused"
   private let endedCategoryIdentifier = "meeting-ended-actions"
   private let pausedCategoryIdentifier = "recording-paused-actions"
+  private let autoStartedIdentifier = "recording-started-automatically"
+  private let autoStartedCategoryIdentifier = "recording-started-automatically-actions"
   private let stopRecordingActionIdentifier = "stop-recording"
   private let keepRecordingActionIdentifier = "keep-recording"
   private let resumeRecordingActionIdentifier = "resume-recording"
@@ -59,6 +61,10 @@ final class MeetingNotificationService: NSObject, UNUserNotificationCenterDelega
       UNNotificationCategory(
         identifier: pausedCategoryIdentifier,
         actions: [resumeRecording, keepPaused],
+        intentIdentifiers: []),
+      UNNotificationCategory(
+        identifier: autoStartedCategoryIdentifier,
+        actions: [stopRecording],
         intentIdentifiers: []),
     ])
   }
@@ -102,12 +108,31 @@ final class MeetingNotificationService: NSObject, UNUserNotificationCenterDelega
   }
 
   func clearStopSuggestion() {
-    let identifiers = [endedIdentifier, pausedIdentifier]
+    let identifiers = [endedIdentifier, pausedIdentifier, autoStartedIdentifier]
     center.removeDeliveredNotifications(withIdentifiers: identifiers)
     center.removePendingNotificationRequests(withIdentifiers: identifiers)
   }
 
-  func showDetectedMeeting(app: String) {
+  /// Says a recording began without the user pressing Record, with a way to stop it.
+  func showRecordingStartedAutomatically(app: String) {
+    Task { @MainActor in
+      do {
+        let granted = try await center.requestAuthorization(options: [.alert, .sound])
+        guard granted else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Recording \(app) meeting"
+        content.body = "Camera and microphone are on in \(app), so Meeting Notes started recording."
+        content.sound = .default
+        content.categoryIdentifier = autoStartedCategoryIdentifier
+        try await center.add(UNNotificationRequest(
+          identifier: autoStartedIdentifier, content: content, trigger: nil))
+      } catch {
+        // The menu bar still shows the recording state if notifications fail.
+      }
+    }
+  }
+
+  func showDetectedMeeting(app: String, cameraActive: Bool = true) {
     if let rearmTask {
       // A pending re-arm means the previous meeting ended and the cooldown was
       // running. A new meeting cancels the cooldown but must still notify, so
@@ -126,7 +151,9 @@ final class MeetingNotificationService: NSObject, UNUserNotificationCenterDelega
 
         let content = UNMutableNotificationContent()
         content.title = "\(app) meeting detected"
-        content.body = "Camera and microphone are active. Open Meeting Notes to start recording."
+        content.body = cameraActive
+          ? "Camera and microphone are active. Open Meeting Notes to start recording."
+          : "\(app) is using the microphone. Open Meeting Notes to start recording."
         content.sound = .default
         content.categoryIdentifier = categoryIdentifier
 

@@ -36,7 +36,9 @@ lock-in.
   language detection, and your notes can be written in the language you prefer.
 - **Stays out of the way.** No Dock icon, no dashboard, no accounts to manage.
   It notices when a video call starts, offers to record, and stops when the
-  call ends.
+  call ends. For Teams and Zoom you can let it start recording on its own
+  when the camera is on and the app is using the microphone; with the camera
+  off it only asks.
 - **Built for follow-up.** Rename meetings, regenerate summaries, open a
   Codex task about any meeting, and set old word-for-word transcripts to
   delete themselves automatically after a period you choose.

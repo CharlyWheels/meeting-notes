@@ -242,7 +242,7 @@ private struct GeneralSettingsPane: View {
           VStack(alignment: .leading, spacing: 4) {
             Text("Detect video meetings")
               .font(.body.weight(.medium))
-            Text("Offer to record when the camera and microphone activate in Zoom, Chrome, Teams, FaceTime, Slack, or WhatsApp.")
+            Text("Offer to record when the camera and microphone activate in Zoom, Chrome, Teams, FaceTime, Slack, or WhatsApp, or when one of those apps uses the microphone with the camera off.")
               .font(.caption)
               .foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
@@ -254,6 +254,29 @@ private struct GeneralSettingsPane: View {
           ))
           .labelsHidden()
           .toggleStyle(.switch)
+        }
+
+        Divider()
+
+        VStack(alignment: .leading, spacing: 8) {
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Record automatically")
+              .font(.body.weight(.medium))
+            Text("Start recording without asking when the camera is on and the app is using the microphone. With the camera off you are only asked. Recording stops a minute after the app releases the microphone.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          HStack(spacing: 16) {
+            ForEach(AutoRecordSettingsStore.supportedApps, id: \.self) { app in
+              Toggle(app, isOn: Binding(
+                get: { model.autoRecordApps.contains(app) },
+                set: { model.setAutoRecord(app, enabled: $0) }
+              ))
+              .toggleStyle(.checkbox)
+            }
+          }
+          .disabled(!model.meetingDetectionEnabled)
         }
 
         Divider()

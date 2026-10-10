@@ -77,6 +77,7 @@ final class AppModel {
   var systemAudioExcludedApps = SystemAudioExclusionStore.excludedApps()
   var systemAudioAvailableApps: [ExcludedAudioApp] = []
   var meetingDetectionEnabled = MeetingDetectionSettingsStore.load()
+  var autoRecordApps = AutoRecordSettingsStore.load()
   var detectedMeetingApp: String?
   var removeFillerWords = FillerWordSettingsStore.load()
   var meetingNotesLanguage = MeetingNotesLanguageStore.load()
@@ -166,6 +167,11 @@ final class AppModel {
   private var httpHookSaveTask: Task<Void, Never>?
   private var latestDetectedMeetingApp: String?
   private var recordingMeetingApp: String?
+  /// The current recording was started by `AutoRecordPolicy`, not by the user.
+  private var recordingStartedAutomatically = false
+  /// The user stopped or dismissed this meeting; do not start it again on its own
+  /// until the meeting ends.
+  private var autoRecordSuppressed = false
   private var stoppedMeetingFinalizationTasks: [UUID: Task<Void, Never>] = [:]
   private var stoppedMeetingGracePeriods: Set<UUID> = []
   private var pendingMeetingSummaries: [UUID: TodayMeetingSummary] = [:]
@@ -244,8 +250,8 @@ final class AppModel {
         guard let self, self.state == .paused else { return }
         Task { await self.resume() }
       }
-      meetingActivityMonitor.onDetectedAppChanged = { [weak self] app in
-        self?.handleDetectedMeetingApp(app)
+      meetingActivityMonitor.onDetectionChanged = { [weak self] detection in
+        self?.handleMeetingDetection(detection)
       }
       if meetingDetectionEnabled { meetingActivityMonitor.start() }
       Task { [weak self] in await self?.loadInitialState() }
@@ -262,6 +268,11 @@ final class AppModel {
       meetingActivityMonitor.stop()
       detectedMeetingApp = nil
     }
+  }
+
+  func setAutoRecord(_ app: String, enabled: Bool) {
+    if enabled { autoRecordApps.insert(app) } else { autoRecordApps.remove(app) }
+    AutoRecordSettingsStore.save(autoRecordApps)
   }
 
   func addIgnoredMeetingTitle() {
@@ -497,15 +508,21 @@ final class AppModel {
   }
 
   func dismissDetectedMeeting() {
+    autoRecordSuppressed = true
     detectedMeetingApp = nil
     MeetingNotificationService.shared.suppressCurrentMeeting()
     if state == .idle { statusText = "Ready" }
   }
 
   func recordDetectedMeeting() {
+    recordDetected(automatically: false)
+  }
+
+  private func recordDetected(automatically: Bool) {
     // The Record button accepts .idle and .failed; the notification action
     // must not be stricter than the button it mirrors.
     guard canManageMeetings else { return }
+    recordingStartedAutomatically = automatically
     let app = detectedMeetingApp
     if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       let app
@@ -518,7 +535,23 @@ final class AppModel {
     Task { await start() }
   }
 
-  private func handleDetectedMeetingApp(_ app: String?) {
+  private func handleMeetingDetection(_ detection: MeetingAppDetector.Detection?) {
+    if detection == nil { autoRecordSuppressed = false }
+    if let detection, canManageMeetings, !autoRecordSuppressed,
+      AutoRecordPolicy.shouldStart(
+        detection, enabledApps: autoRecordApps,
+        canTellMicrophoneOwner: meetingActivityMonitor.canTellMicrophoneOwner)
+    {
+      latestDetectedMeetingApp = detection.app
+      detectedMeetingApp = detection.app
+      recordDetected(automatically: true)
+      MeetingNotificationService.shared.showRecordingStartedAutomatically(app: detection.app)
+      return
+    }
+    handleDetectedMeetingApp(detection?.app, cameraActive: detection?.cameraActive ?? true)
+  }
+
+  private func handleDetectedMeetingApp(_ app: String?, cameraActive: Bool = true) {
     let previousApp = latestDetectedMeetingApp
     latestDetectedMeetingApp = app
     updateMeetingAutoStop()
@@ -542,7 +575,7 @@ final class AppModel {
     detectedMeetingApp = app
     if let app {
       statusText = "\(app) meeting detected"
-      MeetingNotificationService.shared.showDetectedMeeting(app: app)
+      MeetingNotificationService.shared.showDetectedMeeting(app: app, cameraActive: cameraActive)
     }
   }
 
@@ -1800,6 +1833,7 @@ final class AppModel {
   func toggleRecording() {
     switch state {
     case .idle, .failed:
+      recordingStartedAutomatically = false
       recordingMeetingApp = detectedMeetingApp
       if detectedMeetingApp != nil {
         detectedMeetingApp = nil
@@ -1927,6 +1961,7 @@ final class AppModel {
       recordingWakeLock.release()
       meetingAutoStopScheduler.cancel()
       recordingMeetingApp = nil
+      recordingStartedAutomatically = false
       activeRecordingMeetingID = nil
       state = .failed(error.localizedDescription)
       reportError(error.localizedDescription)
@@ -2030,7 +2065,10 @@ final class AppModel {
 
   private func stop() async {
     meetingAutoStopScheduler.cancel()
+    // Stopped while the meeting is still on: the user does not want it recorded.
+    if latestDetectedMeetingApp != nil { autoRecordSuppressed = true }
     recordingMeetingApp = nil
+    recordingStartedAutomatically = false
     recordingWakeLock.release()
     MeetingNotificationService.shared.clearStopSuggestion()
     // A title typed during the recording must survive even when the user
@@ -2210,7 +2248,9 @@ final class AppModel {
     meetingAutoStopScheduler.update(
       recordingMeetingApp: app,
       detectedMeetingApp: latestDetectedMeetingApp,
-      isCapturing: isCapturing
+      isCapturing: isCapturing,
+      gracePeriod: recordingStartedAutomatically
+        ? AutoRecordPolicy.gracePeriod : MeetingAutoStopScheduler.defaultGracePeriod
     ) { [weak self] in
       guard let self, self.state == .recording || self.state == .paused else { return }
       self.statusText = "\(app ?? "Video meeting") ended · finishing…"
