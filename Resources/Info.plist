@@ -19,7 +19,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.3.2</string>
+	<string>1.3.2-auto-record</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -46,9 +46,9 @@
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Meeting Notes captures system audio from calls for local transcription.</string>
 	<key>SUEnableAutomaticChecks</key>
-	<true/>
+	<false/>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/foeken/meeting-notes/main/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/CharlyWheels/meeting-notes/local/appcast-local.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>+ugHEdgTcOnX+rridIwktMlQqu8Q3drmDCQgw3noUBc=</string>
 </dict>
