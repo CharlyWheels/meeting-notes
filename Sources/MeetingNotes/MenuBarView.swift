@@ -607,11 +607,6 @@ struct MenuBarView: View {
         } label: {
           Label("Settings…", systemImage: "gearshape")
         }
-        Button {
-          (NSApp.delegate as? AppDelegate)?.checkForUpdates()
-        } label: {
-          Label("Check for Updates…", systemImage: "arrow.triangle.2.circlepath")
-        }
         Divider()
         Button("Quit Meeting Notes", systemImage: "power") { NSApplication.shared.terminate(nil) }
         Divider()

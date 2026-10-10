@@ -1,21 +1,8 @@
 import AppKit
-import Sparkle
 import SwiftUI
 
-/// Tells Sparkle which appcast channels this Mac may install from. Read on
-/// every check, so switching the setting takes effect without a relaunch.
-final class UpdateChannelDelegate: NSObject, SPUUpdaterDelegate {
-  func allowedChannels(for updater: SPUUpdater) -> Set<String> {
-    UpdateChannelSettingsStore.load().allowedChannelNames
-  }
-
-  /// Beta testers read a separate feed that also carries every stable
-  /// release. Returning `nil` keeps the bundle's own `SUFeedURL`.
-  func feedURLString(for updater: SPUUpdater) -> String? {
-    let configured = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String
-    return UpdateChannelSettingsStore.load().feedURLString(configuredFeed: configured)
-  }
-}
+// Local build: the Sparkle updater is never started. This build is made from
+// source (see FORK.md), and an upstream release must not replace it.
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -25,17 +12,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private var uiTestWindow: NSWindow?
   private var liveTranscriptOverlay: LiveTranscriptOverlay?
-  /// Sparkle holds its delegate weakly, so this must stay owned here.
-  private let updaterDelegate = UpdateChannelDelegate()
-  private lazy var updaterController = SPUStandardUpdaterController(
-    startingUpdater: true,
-    updaterDelegate: updaterDelegate,
-    userDriverDelegate: nil
-  )
-
-  func checkForUpdates() {
-    updaterController.checkForUpdates(nil)
-  }
 
   private static let welcomeShownKey = "welcomeShown"
 
@@ -98,10 +74,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     guard ProcessInfo.processInfo.arguments.contains("--ui-test") else {
       showWelcomeIfNeeded()
       liveTranscriptOverlay = LiveTranscriptOverlay(model: Self.sharedModel)
-      // The lazy updater only exists once something touches it. Without this,
-      // scheduled background update checks never started for users who never
-      // clicked "Check for Updates…" — they stayed on old builds forever.
-      _ = updaterController
       return
     }
     NSApp.setActivationPolicy(.regular)
